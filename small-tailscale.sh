@@ -20,22 +20,21 @@ wget -O /tmp/tailscale.ipk "$IPK_URL"
 opkg install /tmp/tailscale.ipk
 rm /tmp/tailscale.ipk
 
-echo "=== [2/5] Добавляем маршрут до controlplane Tailscale ==="
+echo "=== [2/5] Добавляем маршруты мимо podkop ==="
 GW=$(ip route show default | awk '/default/ {print $3; exit}')
 DEV=$(ip route show default | awk '/default/ {print $5; exit}')
 ip route add 192.200.0.0/24 via $GW dev $DEV 2>/dev/null
-echo "Маршрут: 192.200.0.0/24 via $GW dev $DEV"
+ip rule add to 192.200.0.0/24 priority 50 lookup main 2>/dev/null
+echo "Маршрут: 192.200.0.0/24 via $GW dev $DEV (priority 50, выше podkop)"
+ip route get 192.200.0.1 2>/dev/null
 
 echo "=== [3/5] Запуск демона ==="
 mkdir -p /etc/tailscale /var/run/tailscale
 /usr/sbin/tailscaled --port 41641 --state /etc/tailscale/tailscaled.state &
 TAILSCALED_PID=$!
-echo "tailscaled PID: $TAILSCALED_PID"
 sleep 5
-
-# Проверяем что демон живой
 if ! kill -0 $TAILSCALED_PID 2>/dev/null; then
-  echo "ОШИБКА: tailscaled не запустился, пробуем через init.d..."
+  echo "Пробуем через init.d..."
   /etc/init.d/tailscale start
   sleep 5
 fi
@@ -53,7 +52,10 @@ tailscale serve --bg --tcp 22  tcp://localhost:22
 cat > /etc/rc.local << 'RCEOF'
 #!/bin/sh
 (sleep 15
-ip route add 192.200.0.0/24 via $(ip route show default | awk '/default/ {print $3; exit}') dev $(ip route show default | awk '/default/ {print $5; exit}') 2>/dev/null
+GW=$(ip route show default | awk '/default/ {print $3; exit}')
+DEV=$(ip route show default | awk '/default/ {print $5; exit}')
+ip route add 192.200.0.0/24 via $GW dev $DEV 2>/dev/null
+ip rule add to 192.200.0.0/24 priority 50 lookup main 2>/dev/null
 tailscale serve --bg --tcp 80  tcp://localhost:80
 tailscale serve --bg --tcp 22  tcp://localhost:22
 tailscale serve --bg --tcp 443 tcp://localhost:443) &
@@ -62,5 +64,5 @@ RCEOF
 chmod +x /etc/rc.local
 
 echo ""
-echo "✅ Готово! Статус:"
+echo "Готово! Статус:"
 tailscale status
