@@ -24,7 +24,9 @@ killall tailscaled 2>/dev/null
 sleep 3
 rm -f /var/run/tailscale/tailscaled.sock
 /etc/init.d/tailscale start
-sleep 8
+echo "Ждём запуска tailscaled..."
+i=0; while [ ! -S /var/run/tailscale/tailscaled.sock ] && [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done
+echo "tailscaled готов (через ${i}с)"
 tailscale up --accept-dns=false --accept-routes --reset --hostname=$(cat /proc/sys/kernel/hostname) && \
 tailscale serve --bg --tcp 80  tcp://localhost:80 && \
 tailscale serve --bg --tcp 443 tcp://localhost:443 && \
@@ -33,7 +35,7 @@ tailscale serve --bg --tcp 22  tcp://localhost:22
 echo "=== [3/3] rc.local ==="
 cat > /etc/rc.local << 'RCEOF'
 #!/bin/sh
-(sleep 15
+(sleep 20
 nft insert rule inet PodkopTable mangle_output ip daddr 192.200.0.0/24 return 2>/dev/null
 nft insert rule inet PodkopTable mangle ip daddr 192.200.0.0/24 return 2>/dev/null
 ip rule add to 192.200.0.0/24 priority 50 lookup main 2>/dev/null
