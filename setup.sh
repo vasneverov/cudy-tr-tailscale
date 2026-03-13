@@ -64,3 +64,10 @@ sleep 8
 
 echo ">>> Authorizing Tailscale..."
 tailscale up --accept-dns=false --accept-routes
+
+echo ">>> Setting up Tailscale serve ports..."
+tailscale serve --bg --tcp 80 tcp://localhost:80
+tailscale serve --bg --tcp 443 tcp://localhost:443
+tailscale serve --bg --tcp 22 tcp://localhost:22
+echo ">>> Done! Tailscale is ready."
+tailscale serve status
