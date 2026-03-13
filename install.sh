@@ -5,8 +5,6 @@
 # Usage:
 #   wget -O /tmp/install.sh https://raw.githubusercontent.com/vasneverov/cudy-tr-tailscale/main/install.sh && sh /tmp/install.sh
 
-set -e
-
 echo "=== Tailscale installer for OpenWrt ==="
 
 # Step 1: Clean duplicate repo entries
@@ -16,7 +14,7 @@ mv /tmp/feeds.tmp /etc/opkg/customfeeds.conf
 
 # Step 2: Add signing key
 echo "[2/5] Adding signing key..."
-wget -O /tmp/key-build.pub https://gunanovo.github.io/openwrt-tailscale/key-build.pub
+wget -O /tmp/key-build.pub https://gunanovo.github.io/openwrt-tailscale/key-build.pub || { echo "ERROR: failed to download key"; exit 1; }
 opkg-key add /tmp/key-build.pub
 rm /tmp/key-build.pub
 
@@ -28,22 +26,28 @@ echo "src/gz openwrt-tailscale https://gunanovo.github.io/openwrt-tailscale/$ARC
 
 # Step 4: Update and install
 echo "[4/5] Installing Tailscale..."
-opkg update
-opkg install tailscale
+opkg update || { echo "ERROR: opkg update failed"; exit 1; }
+opkg install tailscale || { echo "ERROR: install failed"; exit 1; }
 
-# Step 5: Authorize and configure serve
+# Step 5: Authorize
 echo "[5/5] Starting Tailscale..."
 echo ""
 echo ">>> Сейчас появится ссылка. Перейди по ней в браузере для авторизации. <<<"
 echo ""
 tailscale up --accept-dns=false --accept-routes --reset
 
+echo ""
+echo ">>> Авторизация прошла успешно! Настраиваю порты... <<<"
+echo ""
+sleep 3
+
+# Step 6: Configure serve
 tailscale serve --bg --tcp 80  tcp://localhost:80
 tailscale serve --bg --tcp 443 tcp://localhost:443
 tailscale serve --bg --tcp 22  tcp://localhost:22
 tailscale serve status
 
-# Step 6: Write autostart
+# Step 7: Write autostart
 printf '#!/bin/sh\n(sleep 10; tailscale serve --bg --tcp 80 tcp://localhost:80; tailscale serve --bg --tcp 22 tcp://localhost:22; tailscale serve --bg --tcp 443 tcp://localhost:443) &\nexit 0\n' > /etc/rc.local
 chmod +x /etc/rc.local
 
