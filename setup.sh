@@ -1,35 +1,66 @@
 #!/bin/sh
-# Шаг 2 из 2: Авторизация и настройка портов Tailscale
-# https://github.com/vasneverov/cudy-tr-tailscale
-#
-# Запусти эту команду ПОСЛЕ install.sh:
-#   wget -O /tmp/setup.sh https://raw.githubusercontent.com/vasneverov/cudy-tr-tailscale/main/setup.sh && sh /tmp/setup.sh
-#
-# ВНИМАНИЕ: После перехода по ссылке авторизации SSH-соединение может оборваться.
-# Это нормально! Подожди 30 секунд, переподключись и снова запусти этот скрипт.
-# Tailscale уже будет авторизован и скрипт сразу настроит порты.
+# =============================================================
+# Tailscale setup script for Cudy WR3000S / TR30 (OpenWrt)
+# Repo: https://github.com/vasneverov/cudy-tr-tailscale
+# =============================================================
 
-echo "=== [2/2] Авторизация и настройка Tailscale ==="
-echo ""
-echo ">>> Сейчас появится ссылка. Перейди по ней для авторизации. <<<"
-echo ">>> Если SSH оборвётся — переподключись и запусти скрипт снова. <<<"
-echo ""
+ARCH=$(opkg print-architecture | awk 'NF==3 && $3~/^[0-9]+$/ {print $2}' | tail -1)
+VERSION="1.96.1"
+IPK_URL="https://github.com/GuNanOvO/openwrt-tailscale/releases/download/v${VERSION}/tailscale_${VERSION}_${ARCH}.ipk"
 
-tailscale up --accept-dns=false --accept-routes --reset
+echo ">>> Arch: $ARCH"
+echo ">>> Installing Tailscale $VERSION..."
 
-echo ""
-echo ">>> Авторизация прошла! Настраиваю порты... <<<"
-echo ""
+opkg remove tailscale 2>/dev/null || true
 
-tailscale serve --bg --tcp 80  tcp://localhost:80
-tailscale serve --bg --tcp 443 tcp://localhost:443
-tailscale serve --bg --tcp 22  tcp://localhost:22
-tailscale serve status
+wget -O /tmp/tailscale.ipk "$IPK_URL" && opkg install /tmp/tailscale.ipk
+rm -f /tmp/tailscale.ipk
 
-# Записываем rc.local с увеличенным sleep чтобы tailscaled успел подняться
-printf '#!/bin/sh\n(sleep 30; tailscale serve --bg --tcp 80 tcp://localhost:80; tailscale serve --bg --tcp 22 tcp://localhost:22; tailscale serve --bg --tcp 443 tcp://localhost:443) &\nexit 0\n' > /etc/rc.local
+echo ">>> Writing /etc/init.d/tailscale..."
+cat > /etc/init.d/tailscale << 'ENDINIT'
+#!/bin/sh /etc/rc.common
+# Copyright 2020 Google LLC.
+# SPDX-License-Identifier: Apache-2.0
+USE_PROCD=1
+START=80
+start_service() {
+  local state_file
+  local port
+  local std_err std_out
+  config_load tailscale
+  config_get_bool std_out "settings" log_stdout 1
+  config_get_bool std_err "settings" log_stderr 1
+  config_get port "settings" port 41641
+  config_get state_file "settings" state_file /etc/tailscale/tailscaled.state
+  config_get fw_mode "settings" fw_mode nftables
+  /usr/sbin/tailscaled --cleanup
+  procd_open_instance
+        procd_set_param command /usr/sbin/tailscaled --tun=userspace-networking --statedir=/var/lib/tailscale --port=41641
+  procd_set_param env TS_DEBUG_FIREWALL_MODE="none" GOGC=10 GOMEMLIMIT=128MiB
+  procd_append_param command --port "$port"
+  procd_append_param command --state "$state_file"
+  procd_set_param respawn
+  procd_set_param stdout "$std_out"
+  procd_set_param stderr "$std_err"
+  procd_close_instance
+}
+stop_service() {
+  /usr/sbin/tailscaled --cleanup
+}
+ENDINIT
+chmod +x /etc/init.d/tailscale
+
+echo ">>> Writing /etc/rc.local..."
+cat > /etc/rc.local << 'ENDRC'
+#!/bin/sh
+(sleep 15; tailscale up --accept-dns=false --accept-routes; sleep 5; tailscale serve --bg --tcp 80 tcp://localhost:80; tailscale serve --bg --tcp 22 tcp://localhost:22; tailscale serve --bg --tcp 443 tcp://localhost:443) &
+exit 0
+ENDRC
 chmod +x /etc/rc.local
 
-echo ""
-echo "=== Готово! Tailscale установлен и настроен. ==="
-echo "=== После перезагрузки Tailscale поднимется автоматически через ~40 секунд. ==="
+echo ">>> Starting tailscaled..."
+/etc/init.d/tailscale restart
+sleep 8
+
+echo ">>> Authorizing Tailscale..."
+tailscale up --accept-dns=false --accept-routes
